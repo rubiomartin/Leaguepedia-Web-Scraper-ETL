@@ -11,7 +11,7 @@ import json
 from airflow.models import Variable
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from etls.etl_functions import data_pipeline, PostgresFileOperator
+from etls.etl_functions import data_pipeline, PostgresFileOperator, table_name
 
 
 default_args = {
@@ -28,12 +28,12 @@ with DAG(
     catchup=False,
 ) as dag:
 
-    league = 'LCK'
-    year = '2021'
-    season = 'Spring'
-    tournament = 'Season'
+    league = 'North+American+Challengers+League'
+    year = '2024'
+    season = 'Summer'
+    tournament = 'Playoffs'
 
-    table_name = f'{league}_{year}_{season}_{tournament}'
+    table_name = table_name(league,year,season,tournament)
 
     extract = PythonOperator(
         task_id='extract_data',
@@ -81,12 +81,6 @@ with DAG(
         operation="write",
         config={"table_name":table_name},
     )
-
-    # creatingxd_csv = PythonOperator(
-    #     task_id='create_csv',
-    #     python_callable=creating_csv,
-    #     dag=dag
-    # )
 
 
     extract  >>create_table >> insert_data

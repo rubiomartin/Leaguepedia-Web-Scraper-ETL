@@ -118,3 +118,19 @@ class PostgresFileOperator(BaseOperator):
     def writeInDb(self, context):
         file_path = context['ti'].xcom_pull(task_ids='extract_data')
         self.postgres_hook.bulk_load(self.config.get('table_name'), file_path)
+
+
+
+def database_name(file_name):
+    if len(file_name) > 7:
+        parts = file_name.split('+')
+        initials = ''.join([part[0].upper() for part in parts])
+        return initials
+    file_name = file_name.replace('+','_')
+    return file_name
+
+def table_name (league: str, year:str, season: str, tournament:str):
+    tournament = tournament.lower()
+    if tournament == "worlds":
+        return f'{tournament}_{year}_{season}'
+    return f'{database_name(league)}_{year}_{season}_{tournament}'

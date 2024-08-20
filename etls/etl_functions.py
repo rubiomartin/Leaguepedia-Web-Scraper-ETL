@@ -10,17 +10,18 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 
 def extract_data (league: str, year:str, season: str, tournament:str):
+        
     try:
-        url = f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D={league}%2F{year}+Season%2F{season}+{tournament}&TS%5Bpreload%5D=TournamentByPlayer&_run="
+        if tournament.lower() == "worlds":
+                    
+            url = f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D={year}+Season+World+Championship%2F{season}&TS%5Bpreload%5D=TournamentByPlayer&_run="
+        else:
+            url = f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D={league}%2F{year}+Season%2F{season}+{tournament}&TS%5Bpreload%5D=TournamentByPlayer&_run="
         print(url)
         response = requests.get(url)
-        if response.status_code == 200:
-       
-            html_content = response.content
-
-      
+        if response.status_code == 200:       
+            html_content = response.content      
             soup = BeautifulSoup(html_content, "html.parser")
-
             tabla = soup.find_all('tbody')[0]
             return tabla
     except Exception as e:
@@ -91,7 +92,10 @@ def data_pipeline(league: str, year:str, season: str, tournament:str, **kwargs):
     data = extract_data(league, year, season, tournament)
     df = create_dataframe(data)
     #df = clean_dataframe(df)
-    file_name = f'{league}_{year}_{season}_{tournament}'
+    if tournament.lower() == "worlds":
+        file_name = f'{tournament}_{year}_{database_name(season)}'
+    else:    
+        file_name = f'{league}_{year}_{season}_{tournament}'
     kwargs['ti'].xcom_push(key='file_name', value=file_name)
     file_path = f'/opt/airflow/data/output/{file_name}.csv'
     df.to_csv(rf'{file_path}', sep='\t', index=False, header=False)
@@ -122,15 +126,16 @@ class PostgresFileOperator(BaseOperator):
 
 
 def database_name(file_name):
-    if len(file_name) > 7:
+    if len(file_name) > 11:
         parts = file_name.split('+')
         initials = ''.join([part[0].upper() for part in parts])
         return initials
-    file_name = file_name.replace('+','_')
+    file_name = file_name.replace('+', '_').replace('-', '_')
+
+
     return file_name
 
-def table_name (league: str, year:str, season: str, tournament:str):
-    tournament = tournament.lower()
-    if tournament == "worlds":
-        return f'{tournament}_{year}_{season}'
+def file_name (league: str, year:str, season: str, tournament:str):
+    if tournament.lower() == "worlds":
+        return f'{tournament}_{year}_{database_name(season)}'
     return f'{database_name(league)}_{year}_{season}_{tournament}'

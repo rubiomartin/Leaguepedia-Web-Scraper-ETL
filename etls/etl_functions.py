@@ -2,107 +2,91 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import sys
-
-from airflow.models import Variable
 from airflow.models.baseoperator import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 
-def extract_data (league: str, year:str, season: str, tournament:str):
-        
-    try:
-        if tournament.lower() == "worlds":
-                    
-            url = f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D={year}+Season+World+Championship%2F{season}&TS%5Bpreload%5D=TournamentByPlayer&_run="
+def construct_url(league, year, tournament):
+    if tournament.lower() == "worlds":
+        if len(year) == 1:
+            return f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D=World+Championship+Season+{year}&TS%5Bpreload%5D=TournamentByPlayer&_run="
         else:
-            url = f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D={league}%2F{year}+Season%2F{season}+{tournament}&TS%5Bpreload%5D=TournamentByPlayer&_run="
-        print(url)
+            return f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D={year}+Season+World+Championship%2F{tournament}&TS%5Bpreload%5D=TournamentByPlayer&_run="
+    return f"https://lol.fandom.com/wiki/Special:RunQuery/TournamentStatistics?TS%5Btournament%5D={league}%2F{year}+Season%2F{tournament}+Season&TS%5Bpreload%5D=TournamentByPlayer&_run="
+
+
+def extract_data(url=None, league=None, year=None, tournament=None):
+    try:
+        url = url or construct_url(league, year, tournament)
         response = requests.get(url)
-        if response.status_code == 200:       
-            html_content = response.content      
-            soup = BeautifulSoup(html_content, "html.parser")
-            tabla = soup.find_all('tbody')[0]
-            return tabla
+        soup = BeautifulSoup(response.content, "html.parser")
+        table = soup.find_all('tbody')[0]        
+        if table:
+            return table
+        else:
+            print("No table found on the page")
+            return None
     except Exception as e:
-        print(e)
+        print(f"An error occurred: {e}")
         sys.exit(1)
 
 
-def create_dataframe (tabla):
-    columnas = ['player', 'games','wins','loses','winrate','k','d','a','kda','cs','csm','g','gm','dmg','dmgm','kpar','ks','gs','cp']
-    df = pd.DataFrame(columns = columnas)
-    img_element = tabla.find_all('img')
-    
-    descripciones = []
-    
-    for desc in img_element:
-        descripciones.append(desc.get('alt'))
-    for indice, cadena in enumerate(descripciones):
-        if "logo std" in cadena:
-            descripciones[indice] = cadena.replace("logo std", "")
-
-    tr = tabla.find_all('tr')
-    for j in range (5, len(tr)):
-        row_data = tr[j].find_all('td')
-        individual_row_data = [row_data[i].text for i in range (1, len(row_data)-1)]
-        lenght = len(df)
-        df.loc[lenght] = individual_row_data
-
-
-    span = [s for s in tabla.find_all('span') if 'title' in s.attrs]
-    champs = ""
-    champs_names= []
+def create_dataframe(table):
+    df_columns = ['teams', 'player', 'games', 'wins', 'loses', 'winrate', 'k', 'd', 'a', 
+                  'kda', 'cs', 'csm', 'g', 'gm', 'dmg', 'dmgm', 'kpar', 'ks', 
+                  'gs', 'champs_played']    
+    df = pd.DataFrame(columns=df_columns)
+    rows = table.find_all('tr')
+    for row_index in range(5, len(rows)):
+        cells = rows[row_index].find_all('td')
+        row_data = [cells[0].find('a').get('title')] + [cell.text for cell in cells[1:-1]]
+        df.loc[len(df)] = row_data
+    span_elements = [s for s in table.find_all('span') if 'title' in s.attrs]
+    champs_names = []
+    df['champs_played'] = df['champs_played'].astype(int)  # Convert 'champs_played' column to integers
     i = 0
-    df['cp'] = df['cp'].astype(int)
-    for index, row in df.iterrows():
-        cp = row['cp']
-
-        if cp >= 3:
-            champs = span[i]['title'] + ", " + span[i+1]['title'] + ", " + span[i+2]['title']
-            champs_names.append(champs)
-            i += 3
-        elif cp == 2:
-            champs = span[i]['title'] + ", " + span[i+1]['title']
-            champs_names.append(champs)
-            i += 2
-        else:
-            champs = span[i]['title']
-            champs_names.append(champs)
-            i += 1
+    for _, row in df.iterrows():
+        # Select titles based on the number of champions ('champs_played')
+        titles_count = min(row['champs_played'], 3)
+        selected_titles = span_elements[i:i + titles_count]
+        champs = ", ".join([title['title'] for title in selected_titles])
+        champs_names.append(champs)
+        i += titles_count
 
     df['champs_names'] = champs_names
-    df.insert(0, 'teams', descripciones)
 
     return df
 
 
+def clean_nan_columns(df):
+    columns = ['games','wins','loses','winrate','k','d','a','kda','cs','csm','g','gm','dmg','dmgm','kpar','ks','gs','champs_played']
+    for column in columns:
+        df[column] = df[column].apply(lambda x: x.replace('-nan%', '\\N') if isinstance(x, str) and '-nan%' in x else x)
+    return df
+	
+def clean_percentage_columns(df):
+    columns = ['games','wins','loses','winrate','k','d','a','kda','cs','csm','g','gm','dmg','dmgm','kpar','ks','gs','champs_played']
+    for column in columns:
+        df[column] = df[column].apply(lambda x: (x.replace('%', '')) if isinstance(x, str) and '%' in x else x)
+        df[column] = df[column].apply(lambda x: (x.replace('-', '\\N')) if isinstance(x, str) and '-' in x else x)
+
+    return df
+
+
+# Clean columns in case of nulls
 def clean_dataframe (df):
-    df['winrate'] = df['winrate'].apply(lambda x: float(x.replace('%', '')) if '%' in x else x)
-    df['kpar'] = df['kpar'].apply(lambda x: float(x.replace('%', '')) if '%' in x else x)
-    df['ks'] = df['ks'].apply(lambda x: float(x.replace('%', '')) if '%' in x else x)
-    df['gs'] = df['gs'].apply(lambda x: float(x.replace('%', '')) if '%' in x else x)
+    clean_nan_columns(df)
+    clean_percentage_columns(df)
+    df['dmg'] = df['dmg'].apply(lambda x: float(x.replace('k', '')) if 'k' in x else x)
+    df['g'] = df['g'].apply(lambda x: float(x.replace('k', '')) if 'k' in x else x)
+  
 
     return df
 
 
 
-
-def data_pipeline(league: str, year:str, season: str, tournament:str, **kwargs):
-    data = extract_data(league, year, season, tournament)
-    df = create_dataframe(data)
-    #df = clean_dataframe(df)
-    if tournament.lower() == "worlds":
-        file_name = f'{tournament}_{year}_{database_name(season)}'
-    else:    
-        file_name = f'{league}_{year}_{season}_{tournament}'
-    kwargs['ti'].xcom_push(key='file_name', value=file_name)
-    file_path = f'/opt/airflow/data/output/{file_name}.csv'
-    df.to_csv(rf'{file_path}', sep='\t', index=False, header=False)
-
-    return file_path
-
-
+# Operator for connect the Postgresql database
 class PostgresFileOperator(BaseOperator):
     @apply_defaults
     def __init__(self,
@@ -117,25 +101,22 @@ class PostgresFileOperator(BaseOperator):
 
     def execute(self, context):
         if self.operation == "write":
-            self.writeInDb(context)  
+            self.writeInDb(context)
 
     def writeInDb(self, context):
         file_path = context['ti'].xcom_pull(task_ids='extract_data')
         self.postgres_hook.bulk_load(self.config.get('table_name'), file_path)
 
 
+def file_name(league: str, year: str, tournament: str):
+    if len(league) > 11:
+        league_processed = ''.join([part[0].upper() for part in league.split('+')])
+    else:
+        league_processed = league.replace('+', '_').replace('-', '_')
 
-def database_name(file_name):
-    if len(file_name) > 11:
-        parts = file_name.split('+')
-        initials = ''.join([part[0].upper() for part in parts])
-        return initials
-    file_name = file_name.replace('+', '_').replace('-', '_')
-
-
-    return file_name
-
-def file_name (league: str, year:str, season: str, tournament:str):
     if tournament.lower() == "worlds":
-        return f'{tournament}_{year}_{database_name(season)}'
-    return f'{database_name(league)}_{year}_{season}_{tournament}'
+        return f'{tournament}_{year}' if len(year) == 1 else f'{tournament}_{year}_{league_processed}'
+    
+    return f'{league_processed}_{year}_{tournament}'
+
+

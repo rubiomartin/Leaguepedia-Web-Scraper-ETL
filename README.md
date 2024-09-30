@@ -3,7 +3,7 @@
 This is a project where I use Python and libraries like BeautifulSoup and Pandas for web scraping the [Leaguepedia](https://lol.fandom.com/wiki/League_of_Legends_Esports_Wiki "Leaguepedia") website, clean the data from League of Legends tournaments, and then save it in PostgreSQL for future analysis with BI tools. With this data, we can view trends over the years, tournaments from different regions, etc. All of this runs in Airflow within a Docker container for scheduling and debugging in case of an error.
 
 ## Explanation video
-[![ETL LOLPEDIA](https://i9.ytimg.com/vi_webp/oIsBHab1jwE/maxresdefault.webp?v=66f9e4b0&sqp=CKTI57cG&rs=AOn4CLAEKp4eE2iCyzjh4gEAvkDP7TvuVw)](https://www.youtube.com/watch?v=oIsBHab1jwE)
+[![ETL LOLPEDIA](assets%2Fminiatura.png)](https://www.youtube.com/watch?v=oIsBHab1jwE)
 
 ## Overview
 
